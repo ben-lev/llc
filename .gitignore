@@ -12,3 +12,5 @@
 # Optional: lock file (for libraries)
 Cargo.lock
 /target
+
+.vscode/
