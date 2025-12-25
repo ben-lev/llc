@@ -1,0 +1,14 @@
+# Compiled artifacts
+/target/
+
+# Editor files
+*.swp
+*.swo
+*.bak
+
+# OS files
+.DS_Store
+
+# Optional: lock file (for libraries)
+Cargo.lock
+/target
