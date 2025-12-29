@@ -26,10 +26,9 @@ impl Decl {
 
             DeclKind::Let { name, value } => {
                 let name_str = name.within(source);
-                println!(
-                    "{ind}Let {{ name: {name_str}, value: {} }}",
-                    value.display(source)
-                );
+                print!("{ind}Let {{ name: {name_str}, value: ");
+                value.pretty_print_inline(indent, source);
+                println!(" }};")
             }
 
             DeclKind::Func {
@@ -48,9 +47,8 @@ impl Decl {
                         param.ty.within(source)
                     );
                 }
-                println!(") -> {} {{", return_type.within(source));
-                body.pretty_print(indent + 2, source);
-                println!("{ind}}}");
+                println!(") -> {} ", return_type.within(source));
+                body.pretty_print_inline(indent + 2, source);
             }
         }
     }
@@ -62,7 +60,8 @@ impl Stmt {
 
         match &self.kind {
             StmtKind::Expr(expr) => {
-                println!("{ind}ExprStmt {}", expr.display(source));
+                expr.pretty_print_inline(indent, source);
+                println!(";")
             }
 
             StmtKind::Decl(decl) => {
@@ -73,27 +72,34 @@ impl Stmt {
 }
 
 impl Expr {
-    /// Return a string representation of the expression,
-    /// using the source to resolve identifiers.
-    fn display(&self, source: &str) -> String {
+    /// Pretty-print the expression **inline** without newlines at the end.
+    /// `indent` is used only for blocks / nested expressions that need indentation.
+    fn pretty_print_inline(&self, indent: usize, source: &str) {
         match &self.kind {
-            ExprKind::IntLit(i) => i.to_string(),
+            ExprKind::IntLit(i) => {
+                print!("{i}");
+            }
 
             ExprKind::StrLit(span) => {
                 let s = span.within(source);
-                format!("\"{s}\"")
+                print!("\"{s}\"");
             }
 
-            ExprKind::BoolLit(b) => b.to_string(),
+            ExprKind::BoolLit(b) => {
+                print!("{b}");
+            }
 
-            ExprKind::Ident(span) => span.within(source).to_string(),
+            ExprKind::Ident(span) => {
+                print!("{}", span.within(source));
+            }
 
             ExprKind::Unary { op, expr } => {
                 let op_str = match op {
                     UnaryOp::Not => "!",
                     UnaryOp::Negate => "-",
                 };
-                format!("{op_str}{}", expr.display(source))
+                print!("{op_str}");
+                expr.pretty_print_inline(indent, source);
             }
 
             ExprKind::Binary { lhs, op, rhs } => {
@@ -103,38 +109,29 @@ impl Expr {
                     BinOp::Mul => "*",
                     BinOp::Divide => "/",
                 };
-                format!("({} {op_str} {})", lhs.display(source), rhs.display(source))
+                print!("(");
+                lhs.pretty_print_inline(indent, source);
+                print!(" {op_str} ");
+                rhs.pretty_print_inline(indent, source);
+                print!(")");
             }
 
             ExprKind::Block { stmts, tail_expr } => {
-                let mut out = String::from("{ ");
+                let ind = indent_str(indent);
+                print!("{{");
 
                 for stmt in stmts {
-                    match &stmt.kind {
-                        StmtKind::Expr(expr) => {
-                            out.push_str(&expr.display(source));
-                            out.push_str("; ");
-                        }
-                        StmtKind::Decl(_) => {
-                            out.push_str("<decl>; ");
-                        }
-                    }
+                    stmt.pretty_print(indent + 1, source);
                 }
 
                 if let Some(expr) = tail_expr {
-                    out.push_str(&expr.display(source));
-                    out.push(' ');
+                    expr.pretty_print_inline(indent + 1, source);
+                    println!("");
                 }
 
-                out.push('}');
-                out
+                print!("{ind}}}");
             }
         }
-    }
-
-    fn pretty_print(&self, indent: usize, source: &str) {
-        let ind = indent_str(indent);
-        println!("{ind}Expr {}", self.display(source));
     }
 }
 

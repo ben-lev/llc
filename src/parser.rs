@@ -512,6 +512,43 @@ mod tests {
         fn find(&self, target: &str) -> SourceRef {
             self.find_skipping(target, 0)
         }
+
+        fn find_block(&self, block_index: usize) -> SourceRef {
+            let mut chars = self.source.chars();
+            let mut open_braces_to_pass = block_index;
+            let start_loc: usize;
+            // Find the start of first block
+            loop {
+                let Some(char) = chars.next() else {
+                    panic!("Can't find the block");
+                };
+
+                if char != '{' {
+                    continue;
+                }
+
+                if open_braces_to_pass == 0 {
+                    start_loc = self.source.len() - chars.as_str().len();
+                    break;
+                } else {
+                    open_braces_to_pass -= 1;
+                }
+            }
+
+            loop {
+                let Some(char) = chars.next() else {
+                    panic!("No closing brace?")
+                };
+                if char != '}' {
+                    continue;
+                }
+                let end_loc = self.source.len() - chars.as_str().len();
+                return SourceRef {
+                    start: start_loc,
+                    end: end_loc,
+                };
+            }
+        }
     }
 
     // === Convenience helpers for building AST nodes ===
@@ -594,5 +631,48 @@ mod tests {
         );
 
         assert_eq!(stmts[0], stmt);
+    }
+
+    #[test]
+    fn test_simple_block() {
+        let source = r#"
+          let y = {
+          let z = 9;
+          4 + z
+        };
+        "#
+        .trim();
+
+        let parser = Parser::new(source);
+        let sref_finder = SRefFinder { source };
+
+        let program = parser.parse().unwrap();
+        program.pretty_print(source);
+
+        let stmts = program.unwrap_top_stmts();
+        assert_eq!(stmts.len(), 1);
+
+        let nine = int_lit(9, sref_finder.find("9"));
+        let let_z = let_decl(sref_finder.find("z"), nine, sref_finder.find("let z = 9;"));
+        let four = int_lit(4, sref_finder.find("4"));
+        let z = ident(sref_finder.find("z"));
+        let add_expr = bin(four, BinOp::Plus, z, sref_finder.find("4 + z"));
+        let block = Expr {
+            kind: ExprKind::Block {
+                stmts: vec![let_z],
+                tail_expr: Some(Box::new(add_expr)),
+            },
+            sref: sref_finder.find_block(0),
+        };
+        let let_y = let_decl(
+            sref_finder.find("y"),
+            block,
+            SourceRef {
+                start: 0,
+                end: source.len(),
+            },
+        );
+
+        assert_eq!(stmts[0], let_y);
     }
 }
