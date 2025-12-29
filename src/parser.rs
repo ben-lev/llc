@@ -9,6 +9,7 @@ pub enum ParseErrorKind {
     },
     UnexpectedEof,
     InvalidLiteral(String),
+    TailExprNotAllowed,
 }
 
 use ParseErrorKind::*;
@@ -48,12 +49,31 @@ pub enum ExprKind {
         op: BinOp,
         rhs: Box<Expr>,
     },
+    Block {
+        stmts: Vec<Stmt>,
+        tail_expr: Option<Box<Expr>>,
+    },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Parameter {
+    pub name: SourceRef,
+    pub ty: SourceRef,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum DeclKind {
     Top(Vec<Stmt>),
-    Let { name: SourceRef, value: Expr },
+    Let {
+        name: SourceRef,
+        value: Expr,
+    },
+    Func {
+        name: SourceRef,
+        parameters: Vec<Parameter>,
+        return_type: SourceRef,
+        body: Expr, // Block expr
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -82,6 +102,11 @@ pub struct Decl {
 
 pub struct Program {
     pub top: Decl,
+}
+
+enum StmtOrTailExpr {
+    Stmt(Stmt),
+    TailExpr(Expr),
 }
 
 impl Program {
@@ -145,21 +170,50 @@ where
     }
 
     fn stmt(&mut self) -> Result<Stmt, ParseError> {
+        match self.stmt_or_tail_expr()? {
+            StmtOrTailExpr::Stmt(stmt) => Ok(stmt),
+            StmtOrTailExpr::TailExpr(expr) => Err(ParseError {
+                kind: TailExprNotAllowed,
+                loc: expr.sref,
+            }),
+        }
+    }
+
+    /// Parses the next sequence of tokens as either a statement or tail
+    /// expression.
+    fn stmt_or_tail_expr(&mut self) -> Result<StmtOrTailExpr, ParseError> {
         let nt = self.tokens.peek();
 
-        let stmt = match nt.kind {
+        match nt.kind {
             Let => {
                 let let_decl = self.let_decl()?;
                 let sref = let_decl.sref;
-                Ok(Stmt {
+                Ok(StmtOrTailExpr::Stmt(Stmt {
                     kind: StmtKind::Decl(Box::new(let_decl)),
                     sref: sref,
-                })
+                }))
             }
-            _ => panic!("unhandled token kind starting stmt {:?}", nt.kind),
-        };
+            Eof => {
+                panic!("stmt_or_tail should never be called with Eof as next token");
+            }
+            _ => {
+                // If it's not any keyword initiated statements, then evaluate
+                // as an expression.
+                let expr = self.expr()?;
 
-        stmt
+                // It's either an expression statement or tail expression
+                // based on presence of semi colon immediately after the expression.
+                if let Some(semi) = self.take_if(Semi) {
+                    let stmt_sref = self.curr_sref(semi.end);
+                    Ok(StmtOrTailExpr::Stmt(Stmt {
+                        kind: StmtKind::Expr(Box::new(expr)),
+                        sref: stmt_sref,
+                    }))
+                } else {
+                    Ok(StmtOrTailExpr::TailExpr(expr))
+                }
+            }
+        }
     }
 
     fn expr(&mut self) -> Result<Expr, ParseError> {
@@ -173,7 +227,7 @@ where
     }
 
     fn add_sub_expr(&mut self) -> Result<Expr, ParseError> {
-        self.binary_expr(&[(Plus, BinOp::Plus), (Minus, BinOp::Minus)], |p| {
+        self.binary_expr(&[(Plus, BinOp::Plus), (Dash, BinOp::Minus)], |p| {
             p.mul_div_expr()
         })
     }
@@ -236,7 +290,7 @@ where
                     },
                 })
             }
-            Minus => {
+            Dash => {
                 self.tokens.take(); // Eat the -
                 let expr = self.unary_expr()?;
                 Ok(Expr {
@@ -288,9 +342,14 @@ where
                 sref: nt.sref(),
             }),
             LParen => {
-                let expr = self.expr();
+                let expr = self.expr()?;
                 self.expect(RParen)?;
-                expr
+                // Overwrite the expression to include the parenthases in the sref.
+                let expr = Expr {
+                    kind: expr.kind,
+                    sref: self.curr_sref(nt.start),
+                };
+                Ok(expr)
             }
             Ident => {
                 let name = nt.sref();
@@ -299,8 +358,45 @@ where
                     sref: name,
                 })
             }
+            LBrace => self.block(nt),
             _ => panic!("Primary expression."),
         }
+    }
+
+    // Note: When this is invoked we've already consumed the '{'
+    fn block(&mut self, lbrace: Token) -> Result<Expr, ParseError> {
+        let start_loc = lbrace.start;
+
+        let mut stmts = Vec::new();
+        let mut tail_expr = None;
+        loop {
+            let nt = self.tokens.peek();
+
+            if nt.kind == Eof {
+                return Err(ParseError {
+                    kind: UnexpectedEof,
+                    loc: self.curr_sref(start_loc),
+                });
+            }
+            if nt.kind == RBrace {
+                break;
+            }
+
+            let stmt_or_tail_expr = self.stmt_or_tail_expr()?;
+            match stmt_or_tail_expr {
+                StmtOrTailExpr::Stmt(stmt) => stmts.push(stmt),
+                StmtOrTailExpr::TailExpr(expr) => {
+                    tail_expr = Some(Box::new(expr));
+                    break;
+                }
+            };
+        }
+
+        self.expect(RBrace)?;
+        Ok(Expr {
+            kind: ExprKind::Block { stmts, tail_expr },
+            sref: self.curr_sref(start_loc),
+        })
     }
 
     fn let_decl(&mut self) -> Result<Decl, ParseError> {
@@ -349,6 +445,26 @@ where
             Some(token)
         } else {
             None
+        }
+    }
+
+    /// If the next token kind is `kind`, then consumes and returns then next token.
+    /// Otherwise returns None and *does not* consume the next token
+    fn take_if(&mut self, kind: TokenKind) -> Option<Token> {
+        if let Some(token) = self.check(kind) {
+            self.tokens.take();
+            Some(token)
+        } else {
+            None
+        }
+    }
+
+    /// Just a small convenience to make an sref from a given start spanning to
+    /// current lexer position.
+    fn curr_sref(&mut self, start: usize) -> SourceRef {
+        SourceRef {
+            start: start,
+            end: self.tokens.current_pos(),
         }
     }
 }
@@ -461,7 +577,6 @@ mod tests {
         let stmts = parser.parse().unwrap().unwrap_top_stmts();
         assert_eq!(stmts.len(), 1);
 
-        // Build AST using helpers
         let x = ident(sref_finder.find("x"));
         let y = ident(sref_finder.find_skipping("y", 1));
         let eight = int_lit(8, sref_finder.find("8"));

@@ -31,7 +31,7 @@ pub enum TokenKind {
     Eq,
     Eof,
     Plus,
-    Minus,
+    Dash,
     Ident,
     True,
     False,
@@ -39,8 +39,12 @@ pub enum TokenKind {
     Bang,
     LParen,
     RParen,
+    LBrace,
+    RBrace,
     Star,
     FSlash,
+    Fn,
+    Arrow,
 }
 
 static KEYWORDS: Lazy<HashMap<&'static str, TokenKind>> = Lazy::new(|| {
@@ -49,6 +53,7 @@ static KEYWORDS: Lazy<HashMap<&'static str, TokenKind>> = Lazy::new(|| {
     kws.insert("false", False);
     kws.insert("let", Let);
     kws.insert("return", Return);
+    kws.insert("fn", Fn);
     kws
 });
 
@@ -107,12 +112,22 @@ impl<'a> TokenStream<'a> {
 
         let tok = match c {
             '+' => Plus,
-            '-' => Minus,
+            '-' => {
+                // Dash may be standalone minus sign or start an Arrow
+                if self.peek_char().unwrap_or('_') == '>' {
+                    self.next_char(); // Eat the '>'
+                    Arrow
+                } else {
+                    Dash
+                }
+            }
             ';' => Semi,
             '=' => Eq,
             '!' => Bang,
             '(' => LParen,
             ')' => RParen,
+            '{' => LBrace,
+            '}' => RBrace,
             '*' => Star,
             '/' => FSlash,
             c if Self::is_ident_start(c) => {
