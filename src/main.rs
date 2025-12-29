@@ -1,5 +1,6 @@
 #![allow(dead_code)]
 
+mod ast_equality;
 mod ast_printer;
 mod compiler;
 mod lexer;

@@ -673,6 +673,6 @@ mod tests {
             },
         );
 
-        assert_eq!(stmts[0], let_y);
+        stmts[0].assert_eq(&let_y, source);
     }
 }

@@ -12,7 +12,7 @@ impl Program {
 }
 
 impl Decl {
-    fn pretty_print(&self, indent: usize, source: &str) {
+    pub fn pretty_print(&self, indent: usize, source: &str) {
         let ind = indent_str(indent);
 
         match &self.kind {
@@ -55,9 +55,7 @@ impl Decl {
 }
 
 impl Stmt {
-    fn pretty_print(&self, indent: usize, source: &str) {
-        let ind = indent_str(indent);
-
+    pub fn pretty_print(&self, indent: usize, source: &str) {
         match &self.kind {
             StmtKind::Expr(expr) => {
                 expr.pretty_print_inline(indent, source);
@@ -74,7 +72,7 @@ impl Stmt {
 impl Expr {
     /// Pretty-print the expression **inline** without newlines at the end.
     /// `indent` is used only for blocks / nested expressions that need indentation.
-    fn pretty_print_inline(&self, indent: usize, source: &str) {
+    pub fn pretty_print_inline(&self, indent: usize, source: &str) {
         match &self.kind {
             ExprKind::IntLit(i) => {
                 print!("{i}");

@@ -195,7 +195,7 @@ impl<'a> TokenStream<'a> {
     }
 
     fn advance_until_ident_end(&mut self) {
-        self.advance_until(|c| c == ' ' || c == ';' || c == ')')
+        self.advance_until(|c| c.is_whitespace() || c == ';' || c == ')')
     }
 
     /// Moves past whitespace, returns number of bytes passed.
