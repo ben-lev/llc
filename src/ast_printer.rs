@@ -47,8 +47,8 @@ impl Decl {
                         param.ty.within(source)
                     );
                 }
-                println!(") -> {} ", return_type.within(source));
-                body.pretty_print_inline(indent + 2, source);
+                print!(") -> {} ", return_type.within(source));
+                body.pretty_print_inline(indent + 1, source);
             }
         }
     }
@@ -115,19 +115,25 @@ impl Expr {
             }
 
             ExprKind::Block { stmts, tail_expr } => {
+                assert!(
+                    indent >= 1,
+                    "Block should never be printed with indent of less than 1. The braces are printed at ind-1"
+                );
                 let ind = indent_str(indent);
-                print!("{{");
+                let ind_brace = indent_str(indent - 1);
+                println!("\n{ind_brace}{{");
 
                 for stmt in stmts {
-                    stmt.pretty_print(indent + 1, source);
+                    stmt.pretty_print(indent, source);
                 }
 
                 if let Some(expr) = tail_expr {
-                    expr.pretty_print_inline(indent + 1, source);
+                    print!("{ind}");
+                    expr.pretty_print_inline(indent, source);
                     println!("");
                 }
 
-                print!("{ind}}}");
+                println!("{ind_brace}}}");
             }
         }
     }

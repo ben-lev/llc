@@ -193,6 +193,14 @@ where
                     sref: sref,
                 }))
             }
+            Func => {
+                let func_decl = self.func_decl()?;
+                let sref = func_decl.sref;
+                Ok(StmtOrTailExpr::Stmt(Stmt {
+                    kind: StmtKind::Decl(Box::new(func_decl)),
+                    sref: sref,
+                }))
+            }
             Eof => {
                 panic!("stmt_or_tail should never be called with Eof as next token");
             }
@@ -365,6 +373,7 @@ where
 
     // Note: When this is invoked we've already consumed the '{'
     fn block(&mut self, lbrace: Token) -> Result<Expr, ParseError> {
+        assert!(lbrace.kind == LBrace);
         let start_loc = lbrace.start;
 
         let mut stmts = Vec::new();
@@ -424,6 +433,53 @@ where
         })
     }
 
+    fn func_decl(&mut self) -> Result<Decl, ParseError> {
+        let start_loc = self.tokens.current_pos();
+
+        self.expect(Func)?;
+        let fn_name = self.expect(Ident)?.sref();
+        self.expect(LParen)?;
+
+        let mut params = Vec::new();
+        // Each iteration we should be either at the name of the next parameter or done with the parameter list
+        loop {
+            if let Some(_) = self.take_if(RParen) {
+                break;
+            }
+
+            let param_name = self.expect(Ident)?.sref();
+            self.expect(Colon)?;
+            let param_type = self.expect(Ident)?.sref();
+
+            let parameter = Parameter {
+                name: param_name,
+                ty: param_type,
+            };
+            params.push(parameter);
+
+            // If there are remaining params, consume the comma before the next one.
+            self.take_if(Comma);
+        }
+
+        self.expect(Arrow)?;
+
+        let return_type = self.expect(Ident)?.sref();
+
+        // Currently block expects that the LBrace has been consumed. TBD if I change this.
+        let lbrace = self.expect(LBrace)?;
+        let block = self.block(lbrace)?;
+
+        Ok(Decl {
+            kind: DeclKind::Func {
+                name: fn_name,
+                parameters: params,
+                return_type: return_type,
+                body: block,
+            },
+            sref: self.curr_sref(start_loc),
+        })
+    }
+
     fn expect(&mut self, expected_kind: TokenKind) -> Result<Token, ParseError> {
         let token = self.tokens.take();
         if token.kind != expected_kind {
@@ -467,6 +523,10 @@ where
             end: self.tokens.current_pos(),
         }
     }
+
+    fn remaining_program(&self) -> &str {
+        self.tokens.remaining_program()
+    }
 }
 
 //fn basic_walk<F, R>(ast: &Program, source: &str, mut pred: F)
@@ -475,27 +535,6 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    struct MockLexer<'a> {
-        tokens: &'a [Token],
-        pos: usize,
-    }
-
-    impl<'a> Lexer<'a> for MockLexer<'a> {
-        fn take(&mut self) -> Token {
-            let token = self.tokens[self.pos];
-            self.pos += 1;
-            token
-        }
-
-        fn peek(&self) -> Token {
-            self.tokens[self.pos]
-        }
-
-        fn current_pos(&self) -> usize {
-            self.pos
-        }
-    }
 
     /// Convenience for tests to construct AST nodes including valid source locs.
     struct SRefFinder<'a> {
@@ -587,6 +626,33 @@ mod tests {
         }
     }
 
+    fn block(stmts: Vec<Stmt>, tail: Option<Expr>) -> Expr {
+        let tail_expr = if let Some(expr) = tail {
+            Some(Box::new(expr))
+        } else {
+            None
+        };
+        Expr {
+            kind: ExprKind::Block {
+                stmts: stmts,
+                tail_expr: tail_expr,
+            },
+            sref: SourceRef::fake(),
+        }
+    }
+
+    fn func(name: SourceRef, params: Vec<Parameter>, ret_ty: SourceRef, body: Expr) -> Decl {
+        Decl {
+            kind: DeclKind::Func {
+                name,
+                parameters: params,
+                return_type: ret_ty,
+                body: body,
+            },
+            sref: SourceRef::fake(),
+        }
+    }
+
     #[test]
     fn test_basic_let_decls() {
         let source = r#"
@@ -630,7 +696,7 @@ mod tests {
             },
         );
 
-        assert_eq!(stmts[0], stmt);
+        stmts[0].assert_eq(&stmt, source);
     }
 
     #[test]
@@ -674,5 +740,61 @@ mod tests {
         );
 
         stmts[0].assert_eq(&let_y, source);
+    }
+
+    #[test]
+    fn test_simple_func() {
+        let source = r#"
+        fn myfunc(x: Int) -> Int {
+            let my_great_var = 392;
+            my_great_var + 7
+        }
+        "#
+        .trim();
+
+        let parser = Parser::new(source);
+        let sref_finder = SRefFinder { source: source };
+        let program = parser.parse().unwrap();
+        program.pretty_print(source);
+
+        let three_nine_two = int_lit(392, SourceRef::fake());
+        let let_decl = let_decl(
+            sref_finder.find("my_great_var"),
+            three_nine_two,
+            SourceRef::fake(),
+        );
+        let seven = int_lit(7, SourceRef::fake());
+        let my_great_var = ident(sref_finder.find_skipping("my_great_var", 1));
+        let add_expr = bin(my_great_var, BinOp::Plus, seven, SourceRef::fake());
+        let func_body = block(vec![let_decl], Some(add_expr));
+        let params = vec![Parameter {
+            name: sref_finder.find("x"),
+            ty: sref_finder.find("Int"),
+        }];
+        let func = func(
+            sref_finder.find("myfunc"),
+            params,
+            sref_finder.find_skipping("Int", 1),
+            func_body,
+        );
+        let stmt = Stmt {
+            kind: StmtKind::Decl(Box::new(func)),
+            sref: SourceRef::fake(),
+        };
+
+        // FIXME: Does this work?
+        let stmts = program.unwrap_top_stmts();
+        assert_eq!(stmts.len(), 1);
+        stmt.assert_eq(&stmts[0], source);
+    }
+
+    impl SourceRef {
+        /// Test utility where we don't care about the source refs being real.
+        fn fake() -> Self {
+            SourceRef {
+                start: usize::MIN,
+                end: usize::MAX,
+            }
+        }
     }
 }

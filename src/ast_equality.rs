@@ -20,6 +20,14 @@ impl Stmt {
 }
 
 impl Decl {
+    pub fn kind_tag(&self) -> &'static str {
+        match self.kind {
+            DeclKind::Top(_) => "Top",
+            DeclKind::Let { .. } => "Let",
+            DeclKind::Func { .. } => "Func",
+        }
+    }
+
     pub fn assert_eq(&self, other: &Decl, source: &str) {
         match (&self.kind, &other.kind) {
             (
@@ -41,16 +49,33 @@ impl Decl {
                     my_stmt.assert_eq(&other_stmt, source);
                 }
             }
-            // (
-            //     DeclKind::Func { name, parameters, return_type, body },
-            //     DeclKind::Func { name: other_name, parameters: other_parameters, return_type: other_return_type, body: other_body }
-            // ) => {
-            //     panic!("Can't test functions for equality yet")
-            // }
+            (
+                DeclKind::Func {
+                    name,
+                    parameters,
+                    return_type,
+                    body,
+                },
+                DeclKind::Func {
+                    name: other_name,
+                    parameters: other_parameters,
+                    return_type: other_return_type,
+                    body: other_body,
+                },
+            ) => {
+                assert_eq!(name, other_name);
+                assert_eq!(parameters, other_parameters);
+                assert_eq!(return_type, other_return_type);
+                body.assert_eq(other_body, source);
+            }
             _ => {
                 self.pretty_print(0, source);
                 other.pretty_print(0, source);
-                panic!("non-matching decl types!")
+                panic!(
+                    "non-matching decl types! {} vs {}",
+                    self.kind_tag(),
+                    other.kind_tag()
+                );
             }
         }
     }

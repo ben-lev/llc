@@ -5,7 +5,7 @@ use std::str::Chars;
 
 #[derive(Clone)]
 pub struct TokenStream<'a> {
-    source: Chars<'a>,
+    pub source: Chars<'a>,
     source_len: usize,
 }
 
@@ -43,8 +43,10 @@ pub enum TokenKind {
     RBrace,
     Star,
     FSlash,
-    Fn,
+    Func,
     Arrow,
+    Colon,
+    Comma,
 }
 
 static KEYWORDS: Lazy<HashMap<&'static str, TokenKind>> = Lazy::new(|| {
@@ -53,7 +55,7 @@ static KEYWORDS: Lazy<HashMap<&'static str, TokenKind>> = Lazy::new(|| {
     kws.insert("false", False);
     kws.insert("let", Let);
     kws.insert("return", Return);
-    kws.insert("fn", Fn);
+    kws.insert("fn", Func);
     kws
 });
 
@@ -130,6 +132,8 @@ impl<'a> TokenStream<'a> {
             '}' => RBrace,
             '*' => Star,
             '/' => FSlash,
+            ':' => Colon,
+            ',' => Comma,
             c if Self::is_ident_start(c) => {
                 self.ident_or_unknown();
                 let id = difference(start_loc, self.current_loc());
@@ -195,7 +199,7 @@ impl<'a> TokenStream<'a> {
     }
 
     fn advance_until_ident_end(&mut self) {
-        self.advance_until(|c| c.is_whitespace() || c == ';' || c == ')')
+        self.advance_while(|c| c == '_' || c.is_alphanumeric());
     }
 
     /// Moves past whitespace, returns number of bytes passed.
@@ -255,6 +259,8 @@ pub trait Lexer<'a> {
 
     /// Distance in bytes from start of the text being lex'd. (For keeping track of location spans).
     fn current_pos(&self) -> usize;
+
+    fn remaining_program(&self) -> &'a str;
 }
 
 impl<'a> Lexer<'a> for TokenStream<'a> {
@@ -268,6 +274,10 @@ impl<'a> Lexer<'a> for TokenStream<'a> {
 
     fn current_pos(&self) -> usize {
         self.current_pos()
+    }
+
+    fn remaining_program(&self) -> &'a str {
+        self.source.as_str()
     }
 }
 
