@@ -850,6 +850,36 @@ mod tests {
         stmts[1].assert_eq(&call, source);
     }
 
+    #[test]
+    fn test_chained_calls() {
+        let source = r#"
+        fn myfunc(x: Int) -> Int {
+            let my_great_var = 392;
+            my_great_var + 7
+        }
+        myfunc(32)(87);
+        "#
+        .trim();
+        let sref_finder = SRefFinder { source: source };
+        let func_decl_stmt = sample_func_stmt();
+        let call_target = ident(sref_finder.find_skipping("myfunc", 1));
+        let call_arg = int_lit(32, SourceRef::fake());
+        let call = call(call_target, vec![call_arg]);
+        let eighty_seven = int_lit(87, SourceRef::fake());
+
+        // The target of this call is the result of the first call expr
+        let second_call = call_stmt(call, vec![eighty_seven]);
+
+        let parser = Parser::new(source);
+        let program = parser.parse().unwrap();
+        program.pretty_print(source);
+        let stmts = program.unwrap_top_stmts();
+
+        assert_eq!(stmts.len(), 2);
+        stmts[0].assert_eq(&func_decl_stmt, source);
+        stmts[1].assert_eq(&second_call, source);
+    }
+
     fn sample_func_stmt() -> Stmt {
         let source = r#"
         fn myfunc(x: Int) -> Int {
