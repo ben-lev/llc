@@ -56,8 +56,10 @@ impl Decl {
 
 impl Stmt {
     pub fn pretty_print(&self, indent: usize, source: &str) {
+        let ind = indent_str(indent);
         match &self.kind {
             StmtKind::Expr(expr) => {
+                print!("{ind}");
                 expr.pretty_print_inline(indent, source);
                 println!(";")
             }
@@ -90,7 +92,13 @@ impl Expr {
             ExprKind::Ident(span) => {
                 print!("{}", span.within(source));
             }
-
+            ExprKind::Call { target, arguments } => {
+                print!("Call {{ target: {:?}, arguments: ", target);
+                for arg in arguments {
+                    arg.pretty_print_inline(indent, source);
+                }
+                print!(" }}");
+            }
             ExprKind::Unary { op, expr } => {
                 let op_str = match op {
                     UnaryOp::Not => "!",

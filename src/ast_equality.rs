@@ -141,6 +141,19 @@ impl Expr {
                     _ => panic!("Block tail expression mismatch"),
                 }
             }
+            (
+                ExprKind::Call { target, arguments },
+                ExprKind::Call {
+                    target: other_target,
+                    arguments: other_arguments,
+                },
+            ) => {
+                target.assert_eq(other_target, source);
+                assert_eq!(arguments.len(), other_arguments.len());
+                for (my_arg, other_arg) in zip(arguments, other_arguments) {
+                    my_arg.assert_eq(other_arg, source);
+                }
+            }
             _ => {
                 // For debugging, print both expressions
                 println!("Left expression:");

@@ -40,6 +40,10 @@ pub enum ExprKind {
     StrLit(SourceRef),
     BoolLit(bool),
     Ident(SourceRef),
+    Call {
+        target: Box<Expr>,
+        arguments: Vec<Expr>,
+    },
     Unary {
         op: UnaryOp,
         expr: Box<Expr>,
@@ -312,8 +316,53 @@ where
                     },
                 })
             }
-            _ => self.primary_expr(),
+            _ => self.postfix_expr(),
         }
+    }
+
+    fn postfix_expr(&mut self) -> Result<Expr, ParseError> {
+        let start_loc = self.tokens.current_pos();
+        let mut lhs = self.primary_expr()?;
+
+        loop {
+            match self.tokens.peek().kind {
+                LParen => {
+                    let args = self.parse_call_args()?;
+                    lhs = Expr {
+                        kind: ExprKind::Call {
+                            target: Box::new(lhs),
+                            arguments: args,
+                        },
+                        sref: self.curr_sref(start_loc),
+                    };
+                }
+                _ => break,
+            };
+        }
+
+        Ok(lhs)
+    }
+
+    // Parses the full call expression from (arg1, arg2, ...) - including the parenthases
+    fn parse_call_args(&mut self) -> Result<Vec<Expr>, ParseError> {
+        self.expect(LParen)?;
+
+        if let Some(_) = self.take_if(RParen) {
+            return Ok(Vec::new());
+        }
+
+        let mut args = Vec::new();
+        loop {
+            let arg_expr = self.expr()?;
+            args.push(arg_expr);
+
+            if self.take_if(RParen).is_some() {
+                break;
+            }
+            self.expect(Comma)?;
+        }
+
+        Ok(args)
     }
 
     fn primary_expr(&mut self) -> Result<Expr, ParseError> {
@@ -529,9 +578,6 @@ where
     }
 }
 
-//fn basic_walk<F, R>(ast: &Program, source: &str, mut pred: F)
-//where F: FnMut()
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -653,6 +699,23 @@ mod tests {
         }
     }
 
+    fn call(target: Expr, args: Vec<Expr>) -> Expr {
+        Expr {
+            kind: ExprKind::Call {
+                target: Box::new(target),
+                arguments: args,
+            },
+            sref: SourceRef::fake(),
+        }
+    }
+
+    fn call_stmt(target: Expr, args: Vec<Expr>) -> Stmt {
+        Stmt {
+            kind: StmtKind::Expr(Box::new(call(target, args))),
+            sref: SourceRef::fake(),
+        }
+    }
+
     #[test]
     fn test_basic_let_decls() {
         let source = r#"
@@ -753,10 +816,49 @@ mod tests {
         .trim();
 
         let parser = Parser::new(source);
-        let sref_finder = SRefFinder { source: source };
         let program = parser.parse().unwrap();
-        program.pretty_print(source);
 
+        let stmt = sample_func_stmt();
+
+        let stmts = program.unwrap_top_stmts();
+        assert_eq!(stmts.len(), 1);
+        stmt.assert_eq(&stmts[0], source);
+    }
+
+    #[test]
+    fn test_simple_func_and_call() {
+        let source = r#"
+        fn myfunc(x: Int) -> Int {
+            let my_great_var = 392;
+            my_great_var + 7
+        }
+        myfunc(32);
+        "#
+        .trim();
+        let sref_finder = SRefFinder { source: source };
+        let func_decl_stmt = sample_func_stmt();
+        let call_target = ident(sref_finder.find_skipping("myfunc", 1));
+        let call_arg = int_lit(32, SourceRef::fake());
+        let call = call_stmt(call_target, vec![call_arg]);
+
+        let parser = Parser::new(source);
+        let program = parser.parse().unwrap();
+        let stmts = program.unwrap_top_stmts();
+
+        assert_eq!(stmts.len(), 2);
+        stmts[0].assert_eq(&func_decl_stmt, source);
+        stmts[1].assert_eq(&call, source);
+    }
+
+    fn sample_func_stmt() -> Stmt {
+        let source = r#"
+        fn myfunc(x: Int) -> Int {
+            let my_great_var = 392;
+            my_great_var + 7
+        }
+        "#
+        .trim();
+        let sref_finder = SRefFinder { source: source };
         let three_nine_two = int_lit(392, SourceRef::fake());
         let let_decl = let_decl(
             sref_finder.find("my_great_var"),
@@ -777,15 +879,10 @@ mod tests {
             sref_finder.find_skipping("Int", 1),
             func_body,
         );
-        let stmt = Stmt {
+        Stmt {
             kind: StmtKind::Decl(Box::new(func)),
             sref: SourceRef::fake(),
-        };
-
-        // FIXME: Does this work?
-        let stmts = program.unwrap_top_stmts();
-        assert_eq!(stmts.len(), 1);
-        stmt.assert_eq(&stmts[0], source);
+        }
     }
 
     impl SourceRef {
